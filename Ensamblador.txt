@@ -1,0 +1,620 @@
+EPROG:.WORD 002565,004651,003723,004535,001410,005020,003021
+EPRG1:.WORD 006000,004455,004335,004650,005420,004601,003021
+EPRG2:.WORD 006000,007776,000022,000000,000015
+EIR:.WORD 0 ;eregistre d'instruccio
+EPC:.WORD 0 ;ecomptador de programa
+ER0:.WORD 0 ;eregistre R0
+ER1:.WORD 0 ;eregistre R1
+ER2:.WORD 0 ;eregistre R2
+ER3:.WORD 0 ;eregistre R3
+ER4:.WORD 0 ;eregistre R4
+ER5:.WORD 0 ;eregistre R5
+ER6:.WORD 0 ;eregistre R6
+ER7:.WORD 0 ;eregistre R7
+ESR:.WORD 0 ;eregistre de flags (00000000 00000ZNC)
+.REGDEF
+.EVEN
+.ENTRY
+
+
+
+
+FETCH:
+
+MOV EPC,R2            ; Aqui pongo el epc, en formato pdp-11, es decir lo 
+                      ; cambiamos a pc haciendo sus modificaciones
+ASL R2                ; y sumandole uno al epc y poniendo la instruccion a eir
+MOV EPROG(R2),EIR
+ADD #1,EPC
+MOV #0,-(SP)          ;hago sitio en la pila, guardo el eir, y voy a subrutina de descodificación 
+MOV EIR,-(SP)
+JSR PC,DESMULETA
+
+
+ADD #2,SP            ;vacio la pila del sitio donde estaba el eir
+MOV (SP)+,R2         ;recupero el valor que la subrutina me ha dado, entre 0 y 15
+
+ASL R2               ; Modifico el valor devuelto por la subrutina y voy a                           			    ;la parte de la ejecución con jmp llista(R2) 
+ASL R2
+
+jmp llista(R2) 
+llista:
+jmp ejmi
+jmp ejmz
+jmp ejmn
+jmp ejmc
+jmp eload
+jmp estore
+jmp eset
+jmp etst
+jmp ecmp
+jmp eadd
+jmp enand
+jmp enot
+jmp esub
+jmp emov
+jmp emult
+jmp ehalt
+
+;aqui esta toda la parte de la ejecución de todas las 
+;instrucciones, en el final de cada ejecucion siempre vuelvo a fetch, para 
+;que el programa continue.
+
+
+ejmi:             ;aqui simplemente consiguo el valor mmmmmmmm  del eir y lo      			;muevo a epc, al final de la ejecución vuelvo a fetch
+MOV EIR,R2
+BIC #177400,R2
+MOV R2,EPC
+JMP FETCH
+
+ejmz:           
+
+;esta instruccion ejmz solo modifica el valor de epc si el flag z=1, y eso se ;mira en ESR, comparando con una mascara y si tiene que saltar va a ejmi que ;siempre salta 
+
+BIT #000004,ESR
+BNE ejmi
+JMP FETCH
+
+ejmn:           ;esta instruccion ejmn solo modifica el valor de epc si el flag n=1,            ;y eso se mira en ESR, comparando con una mascara y si tiene que        		    ;saltar va a ejmi que siempre salta
+BIT #000002,ESR
+BNE ejmi
+JMP FETCH
+
+ejmc:
+BIT #000001,ESR 
+
+;esta instruccion ejmc solo modifica el valor de epc si el flag c=1, y eso se ;mira en ESR, comparando con una mascara y si tiene que saltar va a ejmi que ;siempre salta
+
+BNE ejmi
+JMP FETCH
+
+
+eload: 
+
+;si el bit 8 es 0, el bbbbbbbb es la direccion del operando fuente, y si el bit  ;8 es uno los 3 ultimos bits de la instrucción son el registro destino y el ;valor del registro fuente es los bits del eir3 al eir7 sumados al epc es el ;valor fuente.
+
+
+MOV EIR,R2 
+BIT #000400,R2
+BNE POS1
+BIC #177400,R2
+ASL R2
+MOV EPROG(R2),ER1
+JMP FETCH
+POS1:
+BIC #177770,R2
+JSR PC,DREG
+MOV EPC,R3
+MOV EIR,R0
+BIC #177407,R0
+ASR R0
+ASR R0
+ASL R3
+ADD R3,R0
+MOV EPROG(R0),(R2)
+JMP FETCH
+
+
+
+
+
+
+estore:          ;Muevo el contenido de er1 a la posición mmmmmmmm
+MOV EIR,R3
+BIC #177400,R3
+ASL R3
+MOV ER1,EPROG(R3)
+JMP FETCH
+
+
+
+
+
+eset:  
+;Muevo el valor de sssss al registro ddd y haciendo una extensión de signo si es ;negativo. Manteniendo siempre los bits 13,14,15,16 del emulador pdp-11 siempre  ;a cero.
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV EIR,R3
+BIC #177400,R3
+ASR R3
+ASR R3
+ASR R3
+
+BIT #000020,R3
+BEQ Pos9
+BIS #007740,R3
+Pos9:
+MOV R3,(R2)
+JMP FETCH
+
+
+etst:          
+;Haciendo una and del registro fuente y del registro destino y cambiamos los ;flags n y z
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV R2,R3
+MOV EIR,R2
+ASR R2
+ASR R2
+ASR R2
+BIC #177770,R2
+JSR PC,DREG
+
+MOV (R2),R0
+MOV (R3),R1
+COM R1
+BIC R1,R0
+BIC #170000,R0
+
+JMP FLAGN
+
+
+
+
+ecmp:          
+;Restamos el registro fuente al registro destino y modificamos los flags c,n,z
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV R2,R3
+MOV EIR,R2
+ASR R2
+ASR R2
+ASR R2
+BIC #177770,R2
+JSR PC,DREG
+
+MOV (R2),R0
+MOV (R3),R1
+
+COM R0
+BIC #170000,R0
+
+ADD #1,R0
+ADD R1,R0
+
+JMP FLAGC
+
+
+eadd:        
+
+;Sumo el registro fuente al registro destino y modifico los flags c,n,z
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV R2,R3
+MOV EIR,R2
+ASR R2
+ASR R2
+ASR R2
+BIC #177770,R2
+JSR PC,DREG
+MOV (R2),R0
+MOV (R3),R1
+
+ADD R1,R0
+MOV R0,R1
+BIC #170000,R1
+MOV R1,(R3)
+JMP FLAGC
+
+
+
+
+enand:         
+
+; Hago una nand del registro fuente con el registro destino y pongo los ;resultados al registro destino y modifico el flag z y n
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV R2,R3
+MOV EIR,R2
+ASR R2
+ASR R2
+ASR R2
+BIC #177770,R2
+JSR PC,DREG
+
+MOV (R2),R0
+MOV (R3),R1
+COM R1
+BIC R1,R0
+COM R0
+BIC #170000,R0
+MOV R0,(R3)
+
+JMP FLAGN
+
+enot:        
+
+;niego el registro fuente y lo muevo al registro destino
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV R2,R3
+MOV EIR,R2
+ASR R2
+ASR R2
+ASR R2
+BIC #177770,R2
+JSR PC,DREG
+
+MOV (R2),R0
+MOV (R3),R1
+
+COM R0
+BIC #170000,R0
+MOV R0,(R3)
+JMP FLAGN
+
+
+
+
+
+esub:            
+
+;Resto el registro fuente al registro destino y lo muevo al registro destino. ;Modifico los flags c,n,z
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV R2,R3
+MOV EIR,R2
+ASR R2
+ASR R2
+ASR R2
+BIC #177770,R2
+JSR PC,DREG
+
+MOV (R2),R0
+MOV (R3),R1
+
+COM R0
+BIC #170000,R0
+ADD #1,R0
+ADD R1,R0
+
+MOV R0,R1
+BIC #170000,R1
+MOV R1,(R3)
+JMP FLAGC
+
+
+
+emov:             
+
+;Muevo el registro destino a registro fuente y solo modifico los flags z y n
+
+MOV EIR,R2
+BIC #177770,R2
+JSR PC,DREG
+MOV R2,R3
+MOV EIR,R2
+ASR R2
+ASR R2
+ASR R2
+BIC #177770,R2
+JSR PC,DREG
+
+MOV (R2),R0
+
+MOV R0,(R3)
+
+JMP FLAGN
+
+
+emult:          
+
+;Multiplico con el algoritmo de multiplicación el registro destino y el registro ;fuente y lo pongo en el registro destino, finalmente modifico el flag z y n
+
+
+MOV ER0,R0
+MOV ER0,R1
+
+MOV EIR,R2
+BIC #177400,R2
+ASL R2
+MOV EPROG(R2),R2
+BIT #000400,EIR
+BEQ MUX2
+ASL R2
+MOV EPROG(R2),R2
+MUX2:ADD #1,R2
+MUX:
+ADD R0,R1
+
+SOB R2,MUX
+SUB R0,R1
+SUB R0,R1
+BIC #170000,R1
+MOV R1,ER0
+MOV R1,R0
+JMP FLAGN
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+JMP FETCH  
+;aqui pongo a R2 <- 00000x (los 3 bits menos significativos, donde esta codificado en binario el registro que es)  y antes de volver al programa principal pongo en R2 la dirección del registro oportuno.
+
+;aqui esta la subrutina de decodificación de los registros, antes de entrar aqui ;meto en R2 en los bits menos significativos, los bits desde 000 a 111 en ;binario y los decodifico poniendo en R2 la direccion correspondiente a eri   ;donde i es el numero de registro. Haciendo usos de mascaras consigo encontar la ;direccion de eri (eregistros i)
+
+
+DREG:
+BIT #000001,R2
+BNE IMPAR
+BIT #000002,R2
+BNE PAR26
+BIT #000004,R2
+BNE PAR4
+MOV #ER0,R2 ;el0
+RTS PC
+PAR4:
+MOV #ER4,R2 ;el4
+RTS PC
+PAR26:
+BIT #000004,R2
+BNE PAR6
+MOV #ER2,R2 ;el2
+RTS PC
+PAR6:
+MOV #ER6,R2 ;el6
+RTS PC
+
+
+IMPAR:
+BIT #000002,R2
+BNE PAR37
+BIT #000004,R2
+BNE PAR5
+MOV #ER1,R2 ;el1
+RTS PC
+PAR5:
+MOV #ER5,R2 ;el5
+RTS PC
+PAR37:
+BIT #000004,R2
+BNE PAR7
+MOV #ER3,R2 ;el3
+RTS PC
+PAR7:
+MOV #ER7,R2 ;el7
+RTS PC
+
+
+
+
+
+
+ehalt: 
+HALT
+   
+
+ ;aqui compruebo los flags, en el flag c miro el bit 12 donde esta el bit c
+
+ ;en el flag n compruebo el valor del bit 11,
+
+ ;en el flag z tengo que mirar todos los valores del  resultado desde el bit ;cero al bit 11  que pasa por al alu y si todos son cero poner el flag z a 1
+
+
+
+
+FLAGC:
+;flag c
+BIT #010000,R0
+BNE epos
+BIC #000001,ESR
+JMP FLAGN
+epos:
+BIS #000001,ESR
+
+FLAGN:
+BIC #170000,R0
+
+BIT #004000,R0
+BNE epos7
+BIC #000002,ESR
+JMP FLAGZ
+epos7:
+BIS #000002,ESR
+
+FLAGZ:
+;flag z
+BIC #170000,R0
+BIT #007777,R0
+BEQ epos8
+BIC #000004,ESR
+JMP FETCH
+epos8:
+BIS #000004,ESR
+JMP FETCH
+
+
+
+
+
+
+
+
+
+Aquí empieza la subrutina de librería, antes de pasar por ella se ha guardado un espacio en la pila para el valor esperado y se ha metido también dentro de la pila el valor oportuno de eir. Cuando se ha entrado en ella(subrutina) se han guardado el R2 y el R3 en la pila ya que son los 2 registros que utilizamos para decodificar la eir (emulator instruction register).
+
+Básicamente todo el rato estamos comparando una mascara con un bit a uno con el eir. Esto lo hacemos con el bit test (bit) y si nos da que el flag Z es uno saltamos. Esto se hace aplianco el BEQ, un salto del repositorio de instrucciones. 
+
+Asi lo hacemos durante toda la subrutina, cuando ya sabemos que instrucción es 
+ponemos el valor en la pila, en el espacio reservado. Este valor va desde cero hasta quince.
+
+
+
+
+DESMULETA:
+MOV R2,-(SP)
+MOV R3,-(SP)
+MOV 6.(SP),R2
+
+MOV #004000,R3
+BIT R3,R2
+BNE D2             ;(7-15)
+ASR R3
+BIT R3,R2
+BNE D12            ;(4-6)
+ASR R3
+BIT R3,R2
+BNE D112            ;(2-3)
+ASR R3
+BIT R3,R2
+BNE DJMZ            ;(1)
+                    ;(0)
+MOV #0,8.(SP)
+JMP dexec
+
+DJMZ:               ;(1)
+MOV #1,8.(SP)
+JMP dexec
+
+D112:               ;(2,3)
+ASR R3
+BIT R3,R2
+BNE DJMC            ;(3)
+                    ;(2)
+MOV #2,8.(SP)
+JMP dexec
+
+DJMC:               ;(3)
+
+MOV #3,8.(SP)
+JMP dexec
+
+D12:
+ASR R3
+BIT R3,R2
+BNE DSS             ;(5,6)
+                    ;(4)
+MOV #4,8.(SP)
+JMP dexec
+
+DSS:
+ASR R3
+BIT R3,R2
+BNE DSET            ;(6)
+                    ;(5)
+MOV #5,8.(SP)
+JMP dexec
+
+DSET:               ;(6)
+MOV #6,8.(SP)
+JMP dexec
+
+D2:
+ASR R3
+BIT R3,R2
+BNE DH              ;(15)
+
+ASR R3
+BIT R3,R2
+BNE DMULT           ;(14)
+
+ASR R3
+BIT R3,R2
+BNE DNSM            ;(11-13)
+                    ;(7-10)
+ASR R3
+BIT R3,R2
+BNE DADAN           ;(9,10)
+
+ASR R3
+BIT R3,R2
+BNE DCMP            ;(8)
+                    ;(7)
+MOV #7,8.(SP)
+JMP dexec
+
+
+dexec:
+MOV (SP)+,R3
+MOV (SP)+,R2
+RTS PC
+
+
+
+DCMP:               ;(8)
+MOV #8.,8.(SP)
+JMP dexec
+
+DADAN:              ;(9,10)
+ASR R3
+BIT R3,R2
+BNE DNAND           ;(10)
+                    ;(9)
+MOV #9.,8.(SP)
+JMP dexec
+
+DNAND:              ;(10)
+MOV #10.,8.(SP)
+JMP dexec
+
+DNSM:               ;(11-13)
+ASR R3
+BIT R3,R2
+BNE DMOV            ;(13)
+
+ASR R3
+BIT R3,R2
+BNE DSUB            ;(12)
+                    ;(11)
+MOV #11.,8.(SP)
+JMP dexec
+
+DMULT:              ;(14)
+MOV #14.,8.(SP)
+JMP dexec
+
+DH:                 ;(15)
+MOV #15.,8.(SP)
+JMP dexec
+
+DMOV:               ;(13)
+MOV #13.,8.(SP)
+JMP dexec
+
+DSUB:               ;(12)
+MOV #12.,8.(SP)
+JMP dexec
